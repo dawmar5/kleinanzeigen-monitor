@@ -37,7 +37,7 @@ CATEGORIES = [
 
 MIN_PRICE_EUR = 0          # 0 = uwzglednia tez oferty "zu verschenken" (za darmo)
 MAX_PRICE_EUR = 60000
-MIN_PROFIT_PLN = 4000
+MIN_PROFIT_PLN = 3000
 TRANSPORT_COST_PLN = 1500  # szacunkowy koszt transportu z Niemiec - dopasuj sam
 
 SEEN_FILE = Path(__file__).parent / "seen_ids.json"
@@ -88,8 +88,23 @@ def search_kleinanzeigen(query, page=1):
         return []
 
     soup = BeautifulSoup(r.text, "lxml")
+    adid_count = r.text.count("data-adid")
+    aditem_count = r.text.count("aditem")
     print(f"    [debug] dlugosc odpowiedzi HTML: {len(r.text)} znakow, "
           f"kod statusu: {r.status_code}")
+    print(f"    [debug] wystapien 'data-adid': {adid_count}, "
+          f"wystapien 'aditem': {aditem_count}")
+    if adid_count > 0:
+        idx = r.text.find("data-adid")
+        fragment = r.text[max(0, idx - 200):idx + 400]
+        print(f"    [debug] fragment HTML wokol pierwszego 'data-adid':\n{fragment}")
+    elif "s-anzeige" in r.text:
+        idx = r.text.find("s-anzeige")
+        fragment = r.text[max(0, idx - 200):idx + 400]
+        print(f"    [debug] 'data-adid' nie znaleziono, ale jest 's-anzeige'. Fragment:\n{fragment}")
+    else:
+        print("    [debug] brak 'data-adid' i brak 's-anzeige' w odpowiedzi - "
+              "mozliwe, ze strona wymaga JavaScript albo blokuje bota inaczej.")
     results = []
     for item in soup.select("article.aditem"):
         try:

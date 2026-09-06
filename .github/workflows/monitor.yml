@@ -37,7 +37,10 @@ jobs:
           git add seen_ids.json
           git diff --staged --quiet || git commit -m "aktualizacja widzianych ogloszen"
           for i in 1 2 3 4 5; do
+            git rebase --abort 2>/dev/null || true
+            git merge --abort 2>/dev/null || true
             git pull --rebase origin main && git push && break
             echo "Proba $i nieudana, czekam i probuje ponownie..."
             sleep 5
           done
+          git rebase --abort 2>/dev/null || true

@@ -16,9 +16,9 @@ UWAGA (przeczytaj koniecznie):
   kosztow rejestracji/przegladu/tlumaczen, ani stanu technicznego pojazdu.
   Dostosuj TRANSPORT_COST_PLN i ref_price_pln dla kazdej kategorii ponizej.
 - Darmowy limit SerpApi to 250 wyszukiwan miesiecznie.
-- Tlumaczenie tytulow uzywa darmowego, nieoficjalnego endpointu Google
-  Translate (bez klucza/konta) - moze przestac dzialac bez ostrzezenia,
-  wtedy program po prostu uzywa oryginalnego niemieckiego tekstu.
+- seen_ids.json to teraz zwykly plik tekstowy (jedno ID ogloszenia na linie),
+  NIE lista JSON - dzieki temu Git moze bezpiecznie laczyc zmiany z kilku
+  rownoleglych przebiegow bez konfliktow.
 """
 
 import json
@@ -52,7 +52,7 @@ CATEGORIES = [
 MIN_PRICE_EUR = 0
 MAX_PRICE_EUR = 8000
 MIN_PROFIT_PLN = 3000
-TRANSPORT_COST_PLN = 500
+TRANSPORT_COST_PLN = 1500
 
 SEEN_FILE = Path(__file__).parent / "seen_ids.json"
 
@@ -93,14 +93,22 @@ def get_eur_pln_rate():
 def load_seen():
     if SEEN_FILE.exists():
         try:
-            return set(json.loads(SEEN_FILE.read_text()))
+            lines = SEEN_FILE.read_text().splitlines()
+            return set(line.strip() for line in lines if line.strip())
         except Exception:
             return set()
     return set()
 
 
-def save_seen(seen):
-    SEEN_FILE.write_text(json.dumps(sorted(seen)))
+def append_seen(new_ids):
+    """Dopisuje TYLKO nowe ID (po jednym na linie) na koniec pliku - nie
+    nadpisuje calego pliku, dzieki czemu Git moze bezpiecznie laczyc zmiany
+    z kilku rownoleglych przebiegow bez konfliktow."""
+    if not new_ids:
+        return
+    with open(SEEN_FILE, "a") as f:
+        for ad_id in new_ids:
+            f.write(f"{ad_id}\n")
 
 
 def search_kleinanzeigen(query, page=1):
@@ -259,7 +267,7 @@ def main():
     rate = get_eur_pln_rate()
     print(f"Kurs EUR/PLN: {rate}")
 
-    new_seen = set(seen)
+    newly_found_ids = []
     found_any = False
 
     for cat in CATEGORIES:
@@ -271,7 +279,8 @@ def main():
             for ad in listings:
                 if ad["id"] in seen:
                     continue
-                new_seen.add(ad["id"])
+                newly_found_ids.append(ad["id"])
+                seen.add(ad["id"])
 
                 if not (MIN_PRICE_EUR <= ad["price_eur"] <= MAX_PRICE_EUR):
                     continue
@@ -297,7 +306,7 @@ def main():
                     send_telegram(msg)
                     print(msg)
 
-    save_seen(new_seen)
+    append_seen(newly_found_ids)
     if not found_any:
         print("Brak nowych okazji w tym przebiegu.")
 

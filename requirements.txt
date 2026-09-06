@@ -1,7 +1,4 @@
 requests
 beautifulsoup4
 lxml
-requests
-beautifulsoup4
-lxml
 cloudscraper

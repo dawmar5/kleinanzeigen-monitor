@@ -4,9 +4,12 @@ Porownuje z medianowa cena podobnych ofert na OLX.pl i wysyla powiadomienie
 Telegram, gdy szacowany zysk >= MIN_PROFIT_PLN.
 
 UWAGA (przeczytaj koniecznie):
-- kleinanzeigen.de i OLX.pl moga w kazdej chwili zmienic uklad strony (HTML).
-  Jesli skrypt przestanie znajdowac oferty, trzeba poprawic selektory CSS
-  w funkcjach search_kleinanzeigen() i estimate_polish_price_pln().
+- kleinanzeigen.de i OLX.pl moga w kazdej chwili zmienic uklad strony (HTML)
+  lub zaostrzyc ochrone antybotowa. Uzywamy biblioteki "cloudscraper", ktora
+  probuje automatycznie omijac podstawowe zabezpieczenia typu Cloudflare -
+  ale to nie gwarancja, czasem zapytanie i tak moze zostac zablokowane (403).
+  Jesli skrypt przestanie znajdowac oferty, trzeba poprawic selektory w
+  funkcjach search_kleinanzeigen() i estimate_polish_price_pln().
 - Dopasowanie ceny polskiej odbywa sie po tytule ogloszenia (prosty tekst),
   wiec bywa niedokladne - to szacunek, nie pewnik. Zawsze sprawdz oferte
   recznie przed zakupem.
@@ -25,6 +28,7 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 
 # ---------- KONFIGURACJA - EDYTUJ WEDLUG POTRZEB ----------
@@ -48,10 +52,22 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-    "Accept-Language": "de-DE,de;q=0.9",
+    "Accept-Language": "de-DE,de;q=0.9,pl;q=0.8,en;q=0.7",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "DNT": "1",
 }
 
 NBP_API = "https://api.nbp.pl/api/exchangerates/rates/a/eur/?format=json"
+
+# wspolna "sesja" ktora probuje automatycznie omijac ochrone antybotowa
+SCRAPER = cloudscraper.create_scraper(browser={"custom": HEADERS["User-Agent"]})
 
 
 def get_eur_pln_rate():
@@ -81,7 +97,7 @@ def search_kleinanzeigen(query, page=1):
     """Zwraca liste ofert: [{id, title, price_eur, url}, ...]"""
     url = f"https://www.kleinanzeigen.de/s-seite:{page}/{quote_plus(query)}/k0"
     try:
-        r = requests.get(url, headers=HEADERS, timeout=20)
+        r = SCRAPER.get(url, headers=HEADERS, timeout=20)
         r.raise_for_status()
     except Exception as e:
         print(f"Blad pobierania kleinanzeigen dla '{query}': {e}")
@@ -141,7 +157,7 @@ def estimate_polish_price_pln(title):
     query = quote_plus(title)
     url = f"https://www.olx.pl/oferty/q-{query}/"
     try:
-        r = requests.get(url, headers=HEADERS, timeout=20)
+        r = SCRAPER.get(url, headers=HEADERS, timeout=20)
         r.raise_for_status()
     except Exception as e:
         print(f"Blad pobierania OLX dla '{title}': {e}")

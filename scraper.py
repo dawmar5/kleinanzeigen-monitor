@@ -1,8 +1,9 @@
 """
 Monitor Kleinanzeigen.de (Niemcy) -> samochody (w tym uszkodzone), rolnictwo, opony.
-Porownuje cene z Niemiec z SerpApi (wyszukiwanie cen w Polsce) - a gdy SerpApi
-nie znajdzie wystarczajaco danych, uzywa recznie wpisanej ref_price_pln jako
-fallback. Wysyla powiadomienie Telegram, gdy szacowany zysk >= MIN_PROFIT_PLN.
+Porownuje cene z Niemiec z SerpApi (wyszukiwanie cen w Polsce, po tlumaczeniu
+tytulu na polski) - a gdy SerpApi nie znajdzie wystarczajaco danych, uzywa
+recznie wpisanej ref_price_pln jako fallback. Wysyla powiadomienie Telegram,
+gdy szacowany zysk >= MIN_PROFIT_PLN.
 
 UWAGA (przeczytaj koniecznie):
 - kleinanzeigen.de moze w kazdej chwili zmienic uklad strony (HTML). Jesli
@@ -15,6 +16,9 @@ UWAGA (przeczytaj koniecznie):
   kosztow rejestracji/przegladu/tlumaczen, ani stanu technicznego pojazdu.
   Dostosuj TRANSPORT_COST_PLN i ref_price_pln dla kazdej kategorii ponizej.
 - Darmowy limit SerpApi to 250 wyszukiwan miesiecznie.
+- Tlumaczenie tytulow uzywa darmowego, nieoficjalnego endpointu Google
+  Translate (bez klucza/konta) - moze przestac dzialac bez ostrzezenia,
+  wtedy program po prostu uzywa oryginalnego niemieckiego tekstu.
 """
 
 import json
@@ -38,12 +42,17 @@ CATEGORIES = [
     {"name": "Rolnictwo", "query": "landwirtschaft", "ref_price_pln": 20000},
     {"name": "Pojazdy rolnicze", "query": "agrarfahrzeuge", "ref_price_pln": 20000},
     {"name": "Opony", "query": "reifen", "ref_price_pln": 800},
+    {"name": "Przetrzasarka (Kreiselheuer)", "query": "kreiselheuer", "ref_price_pln": 8000},
+    {"name": "Zgrabiarka (Schwader)", "query": "schwader", "ref_price_pln": 9000},
+    {"name": "Plug (Pflug)", "query": "pflug", "ref_price_pln": 6000},
+    {"name": "Maszyna rolnicza uszkodzona (Schaden)", "query": "landmaschine schaden", "ref_price_pln": 5000},
+    {"name": "Maszyna rolnicza uszkodzona (Defekt)", "query": "landmaschine defekt", "ref_price_pln": 5000},
 ]
 
 MIN_PRICE_EUR = 0
-MAX_PRICE_EUR = 60000
+MAX_PRICE_EUR = 8000
 MIN_PROFIT_PLN = 3000
-TRANSPORT_COST_PLN = 1500
+TRANSPORT_COST_PLN = 500
 
 SEEN_FILE = Path(__file__).parent / "seen_ids.json"
 
@@ -151,14 +160,34 @@ def search_kleinanzeigen(query, page=1):
     return results
 
 
+def translate_de_to_pl(text):
+    """Tlumaczy tekst z niemieckiego na polski (darmowy, nieoficjalny endpoint
+    Google Translate - bez klucza/konta). Jesli sie nie uda, zwraca oryginal."""
+    try:
+        r = requests.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={"client": "gtx", "sl": "de", "tl": "pl", "dt": "t", "q": text},
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        return "".join(seg[0] for seg in data[0])
+    except Exception as e:
+        print(f"Blad tlumaczenia '{text}': {e}, uzywam oryginalu")
+        return text
+
+
 def estimate_polish_price_pln(title, ref_price_pln):
-    """Uzywa SerpApi.com do znalezienia fragmentow tekstu z cenami dla
-    podobnego przedmiotu w Polsce. Zwraca mediane cen w PLN. Jesli SerpApi
-    nie znajdzie wystarczajaco danych, wraca do ref_price_pln (fallback)."""
+    """Uzywa SerpApi.com (darmowy plan) do znalezienia fragmentow tekstu z
+    cenami dla podobnego przedmiotu w Polsce. Tlumaczy tytul na polski przed
+    wyszukaniem. Zwraca mediane cen w PLN, lub ref_price_pln jako fallback."""
     if not SERPAPI_KEY:
         return ref_price_pln
 
-    query = f"{title} cena"
+    title_pl = translate_de_to_pl(title)
+    print(f"    [debug-PL] tlumaczenie: '{title}' -> '{title_pl}'")
+
+    query = f"{title_pl} cena"
     try:
         r = requests.get(
             "https://serpapi.com/search",
@@ -254,9 +283,11 @@ def main():
 
                 if profit >= MIN_PROFIT_PLN:
                     found_any = True
+                    title_pl = translate_de_to_pl(ad["title"])
                     msg = (
                         f"🚜 <b>Okazja: {cat['name']}</b>\n"
-                        f"{ad['title']}\n\n"
+                        f"{ad['title']}\n"
+                        f"({title_pl})\n\n"
                         f"Cena w Niemczech: {ad['price_eur']} EUR (~{price_pln_de:.0f} zl)\n"
                         f"Szac. cena w PL: ~{pl_price:.0f} zl\n"
                         f"Szac. zysk (po transporcie {TRANSPORT_COST_PLN} zl): "

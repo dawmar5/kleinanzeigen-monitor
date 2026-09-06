@@ -88,38 +88,39 @@ def search_kleinanzeigen(query, page=1):
         return []
 
     soup = BeautifulSoup(r.text, "lxml")
-    adid_count = r.text.count("data-adid")
-    aditem_count = r.text.count("aditem")
-    print(f"    [debug] dlugosc odpowiedzi HTML: {len(r.text)} znakow, "
-          f"kod statusu: {r.status_code}")
-    print(f"    [debug] wystapien 'data-adid': {adid_count}, "
-          f"wystapien 'aditem': {aditem_count}")
-    if adid_count > 0:
-        idx = r.text.find("data-adid")
-        fragment = r.text[max(0, idx - 200):idx + 400]
-        print(f"    [debug] fragment HTML wokol pierwszego 'data-adid':\n{fragment}")
-    elif "s-anzeige" in r.text:
-        idx = r.text.find("s-anzeige")
-        fragment = r.text[max(0, idx - 200):idx + 400]
-        print(f"    [debug] 'data-adid' nie znaleziono, ale jest 's-anzeige'. Fragment:\n{fragment}")
-    else:
-        print("    [debug] brak 'data-adid' i brak 's-anzeige' w odpowiedzi - "
-              "mozliwe, ze strona wymaga JavaScript albo blokuje bota inaczej.")
+    print(f"    [debug] kod statusu: {r.status_code}, dlugosc: {len(r.text)} znakow")
+
     results = []
-    for item in soup.select("article.aditem"):
+    for item in soup.select("article[data-adid]"):
         try:
             ad_id = item.get("data-adid")
-            link_tag = item.select_one("a.ellipsis")
-            title = link_tag.get_text(strip=True) if link_tag else None
-            href = link_tag["href"] if link_tag else None
-            price_tag = item.select_one("p.aditem-main--middle--price-shipping--price")
-            price_text = price_tag.get_text(strip=True) if price_tag else ""
+            href = item.get("data-href")
 
-            if "verschenken" in price_text.lower():
+            # tytul: probujemy z osadzonego JSON-LD (bardziej niezawodne niz klasy CSS)
+            title = None
+            script_tag = item.select_one('script[type="application/ld+json"]')
+            if script_tag and script_tag.string:
+                try:
+                    ld_data = json.loads(script_tag.string)
+                    title = ld_data.get("title")
+                except Exception:
+                    title = None
+            if not title and href:
+                slug = href.strip("/").split("/")
+                if len(slug) > 1:
+                    title = slug[1].replace("-", " ")
+
+            # cena: szukamy wzorca "liczba €" w widocznym tekscie calego elementu
+            text = item.get_text(" ", strip=True)
+            if "verschenken" in text.lower():
                 price_eur = 0
             else:
-                digits = re.sub(r"[^\d]", "", price_text)
-                price_eur = int(digits) if digits else None
+                m = re.search(r"([\d.]+)\s*€", text)
+                if m:
+                    digits = re.sub(r"[^\d]", "", m.group(1))
+                    price_eur = int(digits) if digits else None
+                else:
+                    price_eur = None
 
             if not (ad_id and title and href and price_eur is not None):
                 continue

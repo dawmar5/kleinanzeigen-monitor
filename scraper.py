@@ -16,9 +16,8 @@ UWAGA (przeczytaj koniecznie):
   kosztow rejestracji/przegladu/tlumaczen, ani stanu technicznego pojazdu.
   Dostosuj TRANSPORT_COST_PLN i ref_price_pln dla kazdej kategorii ponizej.
 - Darmowy limit SerpApi to 250 wyszukiwan miesiecznie.
-- seen_ids.json to teraz zwykly plik tekstowy (jedno ID ogloszenia na linie),
-  NIE lista JSON - dzieki temu Git moze bezpiecznie laczyc zmiany z kilku
-  rownoleglych przebiegow bez konfliktow.
+- seen_ids.json to zwykly plik tekstowy (jedno ID na linie), NIE lista JSON.
+- Odsiewa oczywiste zabawki/modele (slowa typu "kinder", "spielzeug") z wynikow.
 """
 
 import json
@@ -281,6 +280,11 @@ def main():
                     continue
                 newly_found_ids.append(ad["id"])
                 seen.add(ad["id"])
+
+                junk_words = ["kinder", "spielzeug", "kinderfahrzeug", "modellauto",
+                              "spielauto", "ferngesteuert", "rc-auto"]
+                if any(w in ad["title"].lower() for w in junk_words):
+                    continue
 
                 if not (MIN_PRICE_EUR <= ad["price_eur"] <= MAX_PRICE_EUR):
                     continue

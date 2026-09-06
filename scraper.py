@@ -1,22 +1,20 @@
 """
 Monitor Kleinanzeigen.de (Niemcy) -> samochody (w tym uszkodzone), rolnictwo, opony.
-Porownuje z medianowa cena podobnych ofert na OLX.pl i wysyla powiadomienie
-Telegram, gdy szacowany zysk >= MIN_PROFIT_PLN.
+Porownuje cene z Niemiec z SerpApi (wyszukiwanie cen w Polsce) - a gdy SerpApi
+nie znajdzie wystarczajaco danych, uzywa recznie wpisanej ref_price_pln jako
+fallback. Wysyla powiadomienie Telegram, gdy szacowany zysk >= MIN_PROFIT_PLN.
 
 UWAGA (przeczytaj koniecznie):
-- kleinanzeigen.de i OLX.pl moga w kazdej chwili zmienic uklad strony (HTML)
-  lub zaostrzyc ochrone antybotowa. Uzywamy biblioteki "cloudscraper", ktora
-  probuje automatycznie omijac podstawowe zabezpieczenia typu Cloudflare -
-  ale to nie gwarancja, czasem zapytanie i tak moze zostac zablokowane (403).
-  Jesli skrypt przestanie znajdowac oferty, trzeba poprawic selektory w
-  funkcjach search_kleinanzeigen() i estimate_polish_price_pln().
-- Dopasowanie ceny polskiej odbywa sie po tytule ogloszenia (prosty tekst),
-  wiec bywa niedokladne - to szacunek, nie pewnik. Zawsze sprawdz oferte
-  recznie przed zakupem.
+- kleinanzeigen.de moze w kazdej chwili zmienic uklad strony (HTML). Jesli
+  skrypt przestanie znajdowac oferty, trzeba poprawic selektory w funkcji
+  search_kleinanzeigen().
+- Cena polska z SerpApi to szacunek na podstawie fragmentow wynikow
+  wyszukiwania Google - moze byc niedokladna. ref_price_pln to TWOJA WLASNA
+  ocena, uzywana gdy SerpApi zawiedzie.
 - Kalkulacja zysku NIE uwzglednia: akcyzy przy sprowadzaniu samochodow z UE,
   kosztow rejestracji/przegladu/tlumaczen, ani stanu technicznego pojazdu.
-  Dostosuj TRANSPORT_COST_PLN i traktuj wynik jako pierwsze przesianie ofert,
-  nie ostateczna decyzje.
+  Dostosuj TRANSPORT_COST_PLN i ref_price_pln dla kazdej kategorii ponizej.
+- Darmowy limit SerpApi to 250 wyszukiwan miesiecznie.
 """
 
 import json
@@ -33,24 +31,25 @@ from bs4 import BeautifulSoup
 
 # ---------- KONFIGURACJA - EDYTUJ WEDLUG POTRZEB ----------
 CATEGORIES = [
-    {"name": "Samochod", "query": "auto"},
-    {"name": "Samochod uszkodzony", "query": "auto unfallwagen"},
-    {"name": "Samochod z zepsutym silnikiem", "query": "auto motorschaden"},
-    {"name": "Zepsute sprzegło", "query": "kupplung defekt"},
-    {"name": "Rolnictwo", "query": "landwirtschaft"},
-    {"name": "Pojazdy rolnicze", "query": "agrarfahrzeuge"},
-    {"name": "Opony", "query": "reifen"},
+    {"name": "Samochod", "query": "auto", "ref_price_pln": 15000},
+    {"name": "Samochod uszkodzony", "query": "auto unfallwagen", "ref_price_pln": 8000},
+    {"name": "Samochod z zepsutym silnikiem", "query": "auto motorschaden", "ref_price_pln": 6000},
+    {"name": "Zepsute sprzegło", "query": "kupplung defekt", "ref_price_pln": 7000},
+    {"name": "Rolnictwo", "query": "landwirtschaft", "ref_price_pln": 20000},
+    {"name": "Pojazdy rolnicze", "query": "agrarfahrzeuge", "ref_price_pln": 20000},
+    {"name": "Opony", "query": "reifen", "ref_price_pln": 800},
 ]
 
-MIN_PRICE_EUR = 0          # 0 = uwzglednia tez oferty "zu verschenken" (za darmo)
+MIN_PRICE_EUR = 0
 MAX_PRICE_EUR = 60000
 MIN_PROFIT_PLN = 3000
-TRANSPORT_COST_PLN = 1500  # szacunkowy koszt transportu z Niemiec - dopasuj sam
+TRANSPORT_COST_PLN = 1500
 
 SEEN_FILE = Path(__file__).parent / "seen_ids.json"
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+SERPAPI_KEY = os.environ.get("SERPAPI_KEY")
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -69,7 +68,6 @@ HEADERS = {
 
 NBP_API = "https://api.nbp.pl/api/exchangerates/rates/a/eur/?format=json"
 
-# wspolna "sesja" ktora probuje automatycznie omijac ochrone antybotowa
 SCRAPER = cloudscraper.create_scraper(browser={"custom": HEADERS["User-Agent"]})
 
 
@@ -153,31 +151,61 @@ def search_kleinanzeigen(query, page=1):
     return results
 
 
-def estimate_polish_price_pln(title):
-    """Szuka podobnych ofert na OLX.pl i zwraca mediane ceny w PLN (lub None)."""
-    query = quote_plus(title)
-    url = f"https://www.olx.pl/oferty/q-{query}/"
+def estimate_polish_price_pln(title, ref_price_pln):
+    """Uzywa SerpApi.com do znalezienia fragmentow tekstu z cenami dla
+    podobnego przedmiotu w Polsce. Zwraca mediane cen w PLN. Jesli SerpApi
+    nie znajdzie wystarczajaco danych, wraca do ref_price_pln (fallback)."""
+    if not SERPAPI_KEY:
+        return ref_price_pln
+
+    query = f"{title} cena"
     try:
-        r = SCRAPER.get(url, headers=HEADERS, timeout=20)
+        r = requests.get(
+            "https://serpapi.com/search",
+            params={
+                "engine": "google",
+                "q": query,
+                "api_key": SERPAPI_KEY,
+                "gl": "pl",
+                "hl": "pl",
+                "num": 10,
+            },
+            timeout=30,
+        )
         r.raise_for_status()
     except Exception as e:
-        print(f"Blad pobierania OLX dla '{title}': {e}")
-        return None
+        print(f"Blad zapytania do SerpApi dla '{title}': {e}, uzywam ref_price_pln")
+        return ref_price_pln
 
-    soup = BeautifulSoup(r.text, "lxml")
+    data = r.json()
+    if "error" in data:
+        print(f"SerpApi zwrocilo blad dla '{title}': {data['error']}, uzywam ref_price_pln")
+        return ref_price_pln
+
+    items = data.get("organic_results", [])
+    print(f"    [debug-PL] SerpApi zwrocilo {len(items)} wynikow dla '{query}'")
+
+    combined_text = " ".join(
+        (item.get("title", "") + " " + item.get("snippet", "")) for item in items
+    )
+
+    matches = re.findall(r"(\d[\d\s]{1,8})\s*zł", combined_text)
     prices = []
-    for price_tag in soup.select("[data-testid='ad-price']"):
-        digits = re.sub(r"[^\d]", "", price_tag.get_text())
+    for m in matches:
+        digits = re.sub(r"[^\d]", "", m)
         if digits:
-            prices.append(int(digits))
+            val = int(digits)
+            if 10 <= val <= 500000:
+                prices.append(val)
+
+    print(f"    [debug-PL] znaleziono {len(prices)} pasujacych cen w wynikach")
 
     if len(prices) < 3:
-        return None
+        return ref_price_pln
 
     prices.sort()
     mid = len(prices) // 2
-    median = prices[mid] if len(prices) % 2 else (prices[mid - 1] + prices[mid]) / 2
-    return median
+    return prices[mid] if len(prices) % 2 else (prices[mid - 1] + prices[mid]) / 2
 
 
 def send_telegram(message):
@@ -220,11 +248,7 @@ def main():
                     continue
 
                 price_pln_de = ad["price_eur"] * rate
-                pl_price = estimate_polish_price_pln(ad["title"])
-                time.sleep(2)
-
-                if pl_price is None:
-                    continue
+                pl_price = estimate_polish_price_pln(ad["title"], cat["ref_price_pln"])
 
                 profit = pl_price - price_pln_de - TRANSPORT_COST_PLN
 

@@ -1,5 +1,5 @@
 """
-Monitor Kleinanzeigen.de (Niemcy) -> maszyny rolnicze, samochody, opony rolnicze.
+Monitor Kleinanzeigen.de (Niemcy) -> samochody (w tym uszkodzone), rolnictwo, opony.
 Porownuje z medianowa cena podobnych ofert na OLX.pl i wysyla powiadomienie
 Telegram, gdy szacowany zysk >= MIN_PROFIT_PLN.
 
@@ -14,7 +14,7 @@ UWAGA (przeczytaj koniecznie):
   wiec bywa niedokladne - to szacunek, nie pewnik. Zawsze sprawdz oferte
   recznie przed zakupem.
 - Kalkulacja zysku NIE uwzglednia: akcyzy przy sprowadzaniu samochodow z UE,
-  kosztow rejestracji/przegladu/tlumaczen, ani stanu technicznego maszyny.
+  kosztow rejestracji/przegladu/tlumaczen, ani stanu technicznego pojazdu.
   Dostosuj TRANSPORT_COST_PLN i traktuj wynik jako pierwsze przesianie ofert,
   nie ostateczna decyzje.
 """
@@ -33,10 +33,13 @@ from bs4 import BeautifulSoup
 
 # ---------- KONFIGURACJA - EDYTUJ WEDLUG POTRZEB ----------
 CATEGORIES = [
-    {"name": "Ciagniki rolnicze", "query": "traktor landwirtschaft"},
-    {"name": "Maszyny rolnicze", "query": "landmaschine"},
-    {"name": "Opony rolnicze", "query": "reifen traktor"},
-    {"name": "Samochody", "query": "auto"},
+    {"name": "Samochod", "query": "auto"},
+    {"name": "Samochod uszkodzony", "query": "auto unfallwagen"},
+    {"name": "Samochod z zepsutym silnikiem", "query": "auto motorschaden"},
+    {"name": "Zepsute sprzegło", "query": "kupplung defekt"},
+    {"name": "Rolnictwo", "query": "landwirtschaft"},
+    {"name": "Pojazdy rolnicze", "query": "agrarfahrzeuge"},
+    {"name": "Opony", "query": "reifen"},
 ]
 
 MIN_PRICE_EUR = 0          # 0 = uwzglednia tez oferty "zu verschenken" (za darmo)
@@ -112,7 +115,6 @@ def search_kleinanzeigen(query, page=1):
             ad_id = item.get("data-adid")
             href = item.get("data-href")
 
-            # tytul: probujemy z osadzonego JSON-LD (bardziej niezawodne niz klasy CSS)
             title = None
             script_tag = item.select_one('script[type="application/ld+json"]')
             if script_tag and script_tag.string:
@@ -126,7 +128,6 @@ def search_kleinanzeigen(query, page=1):
                 if len(slug) > 1:
                     title = slug[1].replace("-", " ")
 
-            # cena: szukamy wzorca "liczba €" w widocznym tekscie calego elementu
             text = item.get_text(" ", strip=True)
             if "verschenken" in text.lower():
                 price_eur = 0
@@ -171,7 +172,7 @@ def estimate_polish_price_pln(title):
             prices.append(int(digits))
 
     if len(prices) < 3:
-        return None  # za malo danych porownawczych, nie ryzykuj falszywego alarmu
+        return None
 
     prices.sort()
     mid = len(prices) // 2
@@ -209,7 +210,7 @@ def main():
         for page in (1, 2):
             listings = search_kleinanzeigen(cat["query"], page=page)
             print(f"    -> znaleziono {len(listings)} ofert na stronie {page}")
-            time.sleep(2)  # nie przeciazaj serwera
+            time.sleep(2)
             for ad in listings:
                 if ad["id"] in seen:
                     continue

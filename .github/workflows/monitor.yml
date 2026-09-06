@@ -27,6 +27,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: python scraper.py
 
       - name: Zapisz liste widzianych ogloszen
@@ -40,9 +41,3 @@ jobs:
             echo "Proba $i nieudana, czekam i probuje ponownie..."
             sleep 5
           done
-          - name: Uruchom skaner
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
-        run: python scraper.py

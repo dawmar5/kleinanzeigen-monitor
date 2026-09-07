@@ -17,7 +17,9 @@ UWAGA (przeczytaj koniecznie):
   Dostosuj TRANSPORT_COST_PLN i ref_price_pln dla kazdej kategorii ponizej.
 - Darmowy limit SerpApi to 250 wyszukiwan miesiecznie.
 - seen_ids.json to zwykly plik tekstowy (jedno ID na linie), NIE lista JSON.
-- Odsiewa oczywiste zabawki/modele (slowa typu "kinder", "spielzeug") z wynikow.
+- Odsiewa oczywiste zabawki/foteliki/czesci (slowa typu "kinder", "autositz").
+- MIN_PRICE_EUR podniesione do 200 - prawdziwe pojazdy nie sa "za darmo",
+  a oferty "zu verschenken" to w praktyce prawie zawsze smieci.
 """
 
 import json
@@ -48,10 +50,10 @@ CATEGORIES = [
     {"name": "Maszyna rolnicza uszkodzona (Defekt)", "query": "landmaschine defekt", "ref_price_pln": 5000},
 ]
 
-MIN_PRICE_EUR = 0
+MIN_PRICE_EUR = 200
 MAX_PRICE_EUR = 8000
-MIN_PROFIT_PLN = 500
-TRANSPORT_COST_PLN = 50
+MIN_PROFIT_PLN = 1000
+TRANSPORT_COST_PLN = 1500
 
 SEEN_FILE = Path(__file__).parent / "seen_ids.json"
 
@@ -272,48 +274,4 @@ def main():
     for cat in CATEGORIES:
         print(f"--- Szukam: {cat['name']} ---")
         for page in (1, 2):
-            listings = search_kleinanzeigen(cat["query"], page=page)
-            print(f"    -> znaleziono {len(listings)} ofert na stronie {page}")
-            time.sleep(2)
-            for ad in listings:
-                if ad["id"] in seen:
-                    continue
-                newly_found_ids.append(ad["id"])
-                seen.add(ad["id"])
-
-                junk_words = ["kinder", "spielzeug", "kinderfahrzeug", "modellauto",
-                              "spielauto", "ferngesteuert", "rc-auto"]
-                if any(w in ad["title"].lower() for w in junk_words):
-                    continue
-
-                if not (MIN_PRICE_EUR <= ad["price_eur"] <= MAX_PRICE_EUR):
-                    continue
-
-                price_pln_de = ad["price_eur"] * rate
-                pl_price = estimate_polish_price_pln(ad["title"], cat["ref_price_pln"])
-
-                profit = pl_price - price_pln_de - TRANSPORT_COST_PLN
-
-                if profit >= MIN_PROFIT_PLN:
-                    found_any = True
-                    title_pl = translate_de_to_pl(ad["title"])
-                    msg = (
-                        f"🚜 <b>Okazja: {cat['name']}</b>\n"
-                        f"{ad['title']}\n"
-                        f"({title_pl})\n\n"
-                        f"Cena w Niemczech: {ad['price_eur']} EUR (~{price_pln_de:.0f} zl)\n"
-                        f"Szac. cena w PL: ~{pl_price:.0f} zl\n"
-                        f"Szac. zysk (po transporcie {TRANSPORT_COST_PLN} zl): "
-                        f"<b>{profit:.0f} zl</b>\n\n"
-                        f"{ad['url']}"
-                    )
-                    send_telegram(msg)
-                    print(msg)
-
-    append_seen(newly_found_ids)
-    if not found_any:
-        print("Brak nowych okazji w tym przebiegu.")
-
-
-if __name__ == "__main__":
-    sys.exit(main() or 0)
+            l
